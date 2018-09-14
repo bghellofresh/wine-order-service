@@ -1,0 +1,119 @@
+---
+# Name of your project
+project_name: wine-order-service
+
+# Ownership information
+hellofresh_tribe: special
+hellofresh_squad: wine
+
+# Go source directory
+project_src: github.com/hellofresh/wine-order-service
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Concourse
+#-----------------------------------------------------------------------------------------------------------------------
+
+concourse_host: ci-special.hellofresh.io
+concourse_webtokens: true
+
+#-----------------------------------------------------------------------------------------------------------------------
+# GitHub
+#-----------------------------------------------------------------------------------------------------------------------
+
+# GitHub User/Company name
+github_user: hellofresh
+
+# GitHub repository Name
+github_repository_name: wine-order-service
+
+# GitHub releases flag
+github_build_release: false
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Slack
+#-----------------------------------------------------------------------------------------------------------------------
+
+slack_username: WOS
+slack_channel: "#everyplate-alerts"
+slack_logo: https://hellofresh.github.io/scm-concourse-resources/logo.png
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Docker Host
+#-----------------------------------------------------------------------------------------------------------------------
+
+# Docker daemon socket(s) to connect to
+docker_host: concourse-docker-scm-test000.tools.hellofresh.io
+docker_port: 2376
+
+# A set of variables to export for each integration test
+# Example: `export AMQP_DSN="amqp://guest:guest@${DOCKER_HOST}:${DOCKER_COMPOSE_RABBITMQ_5672}"`
+docker_variables: ''
+
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Jetstream
+#-----------------------------------------------------------------------------------------------------------------------
+
+jetstream_version: 2.0
+
+language_name: golang
+language_version: "1.10"
+
+slack_notifications: true
+
+automation: false
+docker: true
+docker_images:
+    - name: "wine-order-service"
+      repository: "quay.io/hellofresh/wine-order-service"
+      path: "Dockerfile"
+      tag: ""
+
+kubernetes: true
+kubernetes_staging_deployment: true
+kubernetes_live_deployment: true
+kubernetes_charts:
+    - name: "wine-order-service"
+      path: "ahoy/wine-order-service"
+      deployment_tag: "tag"
+      deployment_timeout: "300"
+
+testing_unit: true
+testing_integration: true
+codecov: true
+
+documentation_raml: false
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Vault - Secret management
+#-----------------------------------------------------------------------------------------------------------------------
+
+secrets:
+  ansible_vpass:
+    description: 'Automation vpass used to decode encrypted vars'
+  codecov_token:
+    description: 'Codecov Project Token'
+  concourse_webhook_master:
+    description: 'Concourse webhook token for master'
+  concourse_webhook_pr:
+    description: 'Concourse webhook token for pull requests'
+  docker_password:
+    description: 'Password for docker registry'
+  docker_username:
+    description: 'Username for docker registry'
+  github_token:
+    description: 'GitHub Access Token'
+  kubernetes_ca_live:
+    description: 'Kubernetes live CA'
+  kubernetes_ca_staging:
+    description: 'Kubernetes staging CA'
+  kubernetes_concourse_token_live:
+    description: 'Kubernetes live token'
+  kubernetes_concourse_token_staging:
+    description: 'Kubernetes staging token'
+  kubernetes_url_live:
+    description: 'Kubernetes live cluster url'
+  kubernetes_url_staging:
+    description: 'Kubernetes staging cluster url'
+  slack_url:
+    description: 'Slack url for posting notifications'

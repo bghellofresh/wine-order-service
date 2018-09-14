@@ -1,0 +1,664 @@
+---
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Resource Types
+#-----------------------------------------------------------------------------------------------------------------------
+resource_types:
+
+- name: git-pull-request
+  type: docker-image
+  source:
+    repository: quay.io/hellofresh/concourse-pr
+    tag: v1.0.0
+
+- name: slack-notification
+  type: docker-image
+  source:
+    repository: cfcommunity/slack-notification-resource
+    tag: v1.4.1
+
+- name: helm
+  type: docker-image
+  source:
+    repository: quay.io/hellofresh/concourse-helm-resource
+    tag: 2.9.0
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Resources
+#-----------------------------------------------------------------------------------------------------------------------
+
+resources:
+
+- name: pull-request
+  type: git-pull-request
+  check_every: 1h
+  webhook_token: ((concourse_webhook_pr))
+  source:
+    uri: https://((github_token))@github.com/((github_user))/((github_repository_name)).git
+    repo: ((github_user))/((github_repository_name))
+    access_token: ((github_token))
+    http_cache: false
+
+- name: master-source-code
+  type: git
+  check_every: 1h
+  webhook_token: ((concourse_webhook_master))
+  source:
+    uri: https://((github_token))@github.com/((github_user))/((github_repository_name)).git
+    branch: master
+    http_cache: false
+
+- name: master-release
+  type: github-release
+  source:
+    user: ((github_user))
+    repository: ((github_repository_name))
+    access_token: ((github_token))
+
+- name: master-release-version
+  type: semver
+  source:
+    driver: git
+    uri: https://((github_token))@github.com/((github_user))/((github_repository_name)).git
+    initial_version: 0.1.0
+    branch: version
+    file: version
+
+- name: housekeeper
+  type: time
+  source:
+    interval: 12h
+
+- name: slack-notification
+  type: slack-notification
+  source:
+    url: ((slack_url))
+
+- name: wine-order-service-docker-image
+  type: docker-image
+  source:
+    repository: quay.io/hellofresh/wine-order-service
+    username: ((docker_username))
+    password: ((docker_password))
+
+- name: wine-order-service-helm-staging
+  type: helm
+  source:
+    cluster_url: ((kubernetes_url_staging))
+    cluster_ca: ((kubernetes_ca_staging))
+    token: ((kubernetes_concourse_token_staging))
+    release: wine-order-service
+    repos:
+      - name: hf-charts
+        url: http://charts.hellofresh.io
+
+- name: wine-order-service-helm-live
+  type: helm
+  source:
+    cluster_url: ((kubernetes_url_live))
+    cluster_ca: ((kubernetes_ca_live))
+    token: ((kubernetes_concourse_token_live))
+    release: wine-order-service
+    repos:
+      - name: hf-charts
+        url: http://charts.hellofresh.io
+
+- name: jetstream-ci-scripts
+  type: git
+  source:
+    uri: https://((github_token))@github.com/hellofresh/jetstream-ci-scripts.git
+    branch: master
+#-----------------------------------------------------------------------------------------------------------------------
+# Groups
+#-----------------------------------------------------------------------------------------------------------------------
+groups:
+  - name: ((project_name))
+    jobs:
+    - 'PR: Lint and Syntax check'
+    - 'PR: Code Style'
+    - 'Unit Tests'
+    - 'PR: Unit Tests'
+    - 'Integration Tests'
+    - 'PR: Integration Tests'
+    - 'Build Docker Release'
+    - 'PR: Build Docker Draft Release'
+    - 'Create release'
+    - 'Build Chart Release'
+    - 'Deploy Kubernetes Staging'
+    - 'Deploy Kubernetes Live'
+
+  - name: Master
+    jobs:
+    - 'Unit Tests'
+    - 'Integration Tests'
+    - 'Create release'
+    - 'Build Docker Release'
+    - 'Build Chart Release'
+    - 'Deploy Kubernetes Staging'
+    - 'Deploy Kubernetes Live'
+
+  - name: Pull Request
+    jobs:
+    - 'PR: Lint and Syntax check'
+    - 'PR: Code Style'
+    - 'PR: Unit Tests'
+    - 'PR: Integration Tests'
+    - 'PR: Build Docker Draft Release'
+
+  - name: House keeping
+    jobs:
+      - 'Cleanup Releases'
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Jobs
+#-----------------------------------------------------------------------------------------------------------------------
+jobs:
+
+##----------------------------------------------------------------------------------------------------------------------
+## Pull Request flow
+##----------------------------------------------------------------------------------------------------------------------
+
+- name: 'PR: Lint and Syntax check'
+  plan:
+    - get: source-code
+      resource: pull-request
+      trigger: True
+      version: every
+
+    - get: jetstream-ci-scripts
+
+    - put: Set lint badge (pending)
+      resource: pull-request
+      params: { path: source-code, context: lint, status: pending }
+
+    - aggregate:
+      - task: Check committed files
+        file: jetstream-ci-scripts/tasks/check-files.yml
+
+      - task: Check branch name
+        file: jetstream-ci-scripts/tasks/check-branch.yml
+
+      - task: Check helm chart
+        file: jetstream-ci-scripts/tasks/check-helm-chart.yml
+        params:
+          VPASS: ((ansible_vpass))
+  on_failure:
+    put: Set lint badge (failure)
+    resource: pull-request
+    params: { path: source-code, context: lint, status: failure }
+
+  on_success:
+    put: Set lint badge (success)
+    resource: pull-request
+    params: { path: source-code, context: lint, status: success }
+
+- name: 'PR: Code Style'
+  plan:
+    - get: source-code
+      resource: pull-request
+      trigger: True
+      version: every
+      passed:
+        - 'PR: Lint and Syntax check'
+
+    - get: jetstream-ci-scripts
+
+    - aggregate:
+      - put: Set code-style badge (pending)
+        resource: pull-request
+        params: { path: source-code, context: code-style, status: pending }
+
+      - task: Download dependencies
+        file: jetstream-ci-scripts/tasks/go/download-deps.yml
+        params:
+          GITHUB_TOKEN: ((github_token))
+          GOPACKAGE: ((project_src))
+
+    - task: Check the code styles
+      file: jetstream-ci-scripts/tasks/go/code-style.yml
+      params:
+        GOPACKAGE: ((project_src))
+
+  on_failure:
+    put: Set code-style badge (failure)
+    resource: pull-request
+    params: { path: source-code, context: code-style, status: failure }
+
+  on_success:
+    put: Set code-style badge (success)
+    resource: pull-request
+    params: { path: source-code, context: code-style, status: success }
+
+- name: 'PR: Unit Tests'
+  plan:
+    - get: source-code
+      resource: pull-request
+      trigger: True
+      version: every
+      passed:
+        - 'PR: Lint and Syntax check'
+
+    - get: jetstream-ci-scripts
+
+    - aggregate:
+      - put: Set unit-tests badge (pending)
+        resource: pull-request
+        params: { path: source-code, context: unit-tests, status: pending }
+
+      - task: Download dependencies
+        file: jetstream-ci-scripts/tasks/go/download-deps.yml
+        params:
+          GITHUB_TOKEN: ((github_token))
+          GOPACKAGE: ((project_src))
+
+    - task: Run unit tests
+      file: source-code/ci/tasks/unit-tests.yml
+      params:
+        CODECOV_TOKEN: ((codecov_token))
+
+  on_failure:
+    put: Set unit-tests badge (failure)
+    resource: pull-request
+    params: { path: source-code, context: unit-tests, status: failure }
+
+  on_success:
+    put: Set unit-tests badge (success)
+    resource: pull-request
+    params: { path: source-code, context: unit-tests, status: success }
+
+- name: 'PR: Integration Tests'
+  plan:
+    - get: source-code
+      resource: pull-request
+      trigger: True
+      version: every
+      passed:
+        - 'PR: Unit Tests'
+
+    - get: jetstream-ci-scripts
+
+    - aggregate:
+      - put: Set integration-tests badge (pending)
+        resource: pull-request
+        params: { path: source-code, context: integration-tests, status: pending }
+
+      - task: Download dependencies
+        file: jetstream-ci-scripts/tasks/go/download-deps.yml
+        params:
+          GITHUB_TOKEN: ((github_token))
+          GOPACKAGE: ((project_src))
+
+      - task: Start docker container
+        file: jetstream-ci-scripts/tasks/docker-up.yml
+        params:
+          DOCKER_HOST: ((docker_host))
+          DOCKER_PORT: ((docker_port))
+          DOCKER_COMPOSE: ci/assets/docker-compose.yml
+
+    - task: Run integration tests
+      file: source-code/ci/tasks/integration-tests.yml
+      params:
+        DOCKER_HOST: ((docker_host))
+        PROJECT_VARS: ((docker_variables))
+        CODECOV_TOKEN: ((codecov_token))
+
+  ensure:
+    do:
+    - task: Destroy docker container
+      file: jetstream-ci-scripts/tasks/docker-down.yml
+      params:
+        DOCKER_HOST: ((docker_host))
+        DOCKER_PORT: ((docker_port))
+        DOCKER_COMPOSE: ci/assets/docker-compose.yml
+
+  on_failure:
+    put: Set integration-tests badge (failure)
+    resource: pull-request
+    params: { path: source-code, context: integration-tests, status: failure }
+
+  on_success:
+    put: Set integration-tests badge (success)
+    resource: pull-request
+    params: { path: source-code, context: integration-tests, status: success }
+
+- name: 'PR: Build Docker Draft Release'
+  plan:
+  - get: source-code
+    resource: pull-request
+    trigger: True
+    passed:
+      - 'PR: Integration Tests'
+
+  - get: jetstream-ci-scripts
+
+  - task: Get PR draft version
+    file: jetstream-ci-scripts/tasks/draft-version.yml
+    params:
+      USE_AUTOMATION: false
+    output_mapping:
+      draft-version: version
+
+  - aggregate:
+    - task: docker-build-args
+      file: jetstream-ci-scripts/tasks/docker-build-args.yml
+      params:
+        GITHUB_TOKEN: ((github_token))
+
+    - task: Download dependencies
+      file: jetstream-ci-scripts/tasks/go/download-deps.yml
+      params:
+        GITHUB_TOKEN: ((github_token))
+        GOPACKAGE: ((project_src))
+
+  - aggregate:
+    - put: wine-order-service-docker-image
+      get_params:
+        skip_download: true
+      params:
+        build: source-code-deps
+        tag_as_latest: false
+        tag: version/version
+        build_args_file: app-version/version.json
+        dockerfile: source-code-deps/Dockerfile
+
+#-----------------------------------------------------------------------------------------------------------------------
+# Master flow
+#-----------------------------------------------------------------------------------------------------------------------
+
+- name: 'Unit Tests'
+  plan:
+    - get: source-code
+      resource: master-source-code
+      trigger: true
+
+    - get: jetstream-ci-scripts
+
+    - task: Download dependencies
+      file: jetstream-ci-scripts/tasks/go/download-deps.yml
+      params:
+        GITHUB_TOKEN: ((github_token))
+        GOPACKAGE: ((project_src))
+
+    - task: Run unit tests
+      file: source-code/ci/tasks/unit-tests.yml
+      params:
+        CODECOV_TOKEN: ((codecov_token))
+
+- name: 'Integration Tests'
+  plan:
+    - get: source-code
+      resource: master-source-code
+      trigger: true
+
+    - get: jetstream-ci-scripts
+
+    - aggregate:
+      - task: Download dependencies
+        file: jetstream-ci-scripts/tasks/go/download-deps.yml
+        params:
+          GITHUB_TOKEN: ((github_token))
+          GOPACKAGE: ((project_src))
+
+      - task: Start docker container
+        file: jetstream-ci-scripts/tasks/docker-up.yml
+        params:
+          DOCKER_HOST: ((docker_host))
+          DOCKER_PORT: ((docker_port))
+          DOCKER_COMPOSE: ci/assets/docker-compose.yml
+
+    - task: Run integration tests
+      file: source-code/ci/tasks/integration-tests.yml
+      params:
+        DOCKER_HOST: ((docker_host))
+        PROJECT_VARS: ((docker_variables))
+        CODECOV_TOKEN: ((codecov_token))
+
+  ensure:
+    do:
+    - task: Destroy docker container
+      file: jetstream-ci-scripts/tasks/docker-down.yml
+      params:
+        DOCKER_HOST: ((docker_host))
+        DOCKER_PORT: ((docker_port))
+        DOCKER_COMPOSE: ci/assets/docker-compose.yml
+
+- name: 'Create release'
+  serial: true
+  plan:
+    - get: source-code
+      resource: master-source-code
+      trigger: true
+      passed:
+        - 'Unit Tests'
+        - 'Integration Tests'
+
+    - get: master-release-version
+
+    - get: jetstream-ci-scripts
+
+    - aggregate:
+      - task: Update release version
+        file: jetstream-ci-scripts/tasks/release-version-bump.yml
+        params:
+          ACCESS_TOKEN: ((github_token))
+          REPOSITORY: ((github_user))/((github_repository_name))
+        input_mapping:
+          version: master-release-version
+        output_mapping:
+          release-version: version
+
+    - put: Push release
+      resource: master-release
+      params:
+        name: version/version
+        tag: version/version
+
+    - put: Push release version
+      resource: master-release-version
+      params:
+        file: version/version
+
+- name: 'Build Docker Release'
+  plan:
+  - aggregate:
+    - get: version
+      resource: master-release-version
+      trigger: true
+      passed:
+        - 'Create release'
+    - get: source-code
+      resource: master-source-code
+
+    - get: jetstream-ci-scripts
+
+  - aggregate:
+    - task: docker-build-args
+      file: jetstream-ci-scripts/tasks/docker-build-args.yml
+      params:
+        GITHUB_TOKEN: ((github_token))
+
+    - task: Download dependencies
+      file: jetstream-ci-scripts/tasks/go/download-deps.yml
+      params:
+        GITHUB_TOKEN: ((github_token))
+        GOPACKAGE: ((project_src))
+
+  - aggregate:
+    - put: wine-order-service-docker-image
+      get_params:
+        skip_download: true
+      params:
+        build: source-code-deps
+        tag_as_latest: true
+        tag: version/version
+        build_args_file: app-version/version.json
+        dockerfile: source-code-deps/Dockerfile
+
+- name: 'Build Chart Release'
+  public: false
+  serial: true
+  plan:
+  - get: version
+    resource: master-release-version
+    trigger: true
+    passed:
+      - 'Create release'
+
+  - get: source-code
+    resource: master-source-code
+
+  - get: jetstream-ci-scripts
+
+  - aggregate:
+    - task: wine-order-service-create-chart
+      file: jetstream-ci-scripts/tasks/kubernetes-create-chart.yml
+      params:
+          CHART_REPO: http://charts.hellofresh.io
+          CHART_NAME: wine-order-service
+          CHART_PATH: source-code/ahoy/wine-order-service
+
+- name: 'Deploy Kubernetes Staging'
+  public: false
+  serial: true
+  plan:
+  - get: version
+    resource: master-release-version
+    trigger: true
+    passed:
+      - 'Build Docker Release'
+      - 'Build Chart Release'
+
+  - get: source-code
+    resource: master-source-code
+
+  - put: slack-notification
+    params:
+      channel: ((slack_channel))
+      username: ((slack_username))
+      icon_url: ((slack_logo))
+      text_file: version/version
+      text: >
+        Deploying to Kubernetes... :ahoy: (Environment: Staging,
+        Version: <https://github.com/((github_user))/((github_repository_name))/releases/tag/$TEXT_FILE_CONTENT|$TEXT_FILE_CONTENT>,
+        Build: <http://((concourse_host))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_NAME>)
+
+  - aggregate:
+    - put: wine-order-service-helm-staging
+      params:
+        chart: hf-charts/wine-order-service
+        values:
+        - source-code/ahoy/wine-order-service/values-staging.yaml
+        - source-code/ahoy/wine-order-service/secrets-staging.yaml
+        version: version/version
+        vpass: ((ansible_vpass))
+        wait_until_ready: 300
+        override_values:
+        - key: tag
+          path: version/version
+      on_failure:
+        put: slack-notification
+        params:
+          channel: ((slack_channel))
+          username: ((slack_username))
+          icon_url: ((slack_logo))
+          text_file: version/version
+          text: >
+            Deployment to Kubernetes failed! :x: (Environment: Staging,
+            Chart: wine-order-service
+            Version: <https://github.com/((github_user))/((github_repository_name))/releases/tag/$TEXT_FILE_CONTENT|$TEXT_FILE_CONTENT>,
+            Build: <http://((concourse_host))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_NAME>)
+
+      on_success:
+        put: slack-notification
+        params:
+          channel: ((slack_channel))
+          username: ((slack_username))
+          icon_url: ((slack_logo))
+          text_file: version/version
+          text: >
+            Deployment to Kubernetes succeeded! :white_check_mark: (Environment: Staging,
+            Chart: wine-order-service,
+            Version: <https://github.com/((github_user))/((github_repository_name))/releases/tag/$TEXT_FILE_CONTENT|$TEXT_FILE_CONTENT>,
+            Build: <http://((concourse_host))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_NAME>)
+
+- name: 'Deploy Kubernetes Live'
+  public: false
+  serial: true
+  plan:
+  - get: version
+    resource: master-release-version
+    trigger: false
+    passed:
+      - 'Deploy Kubernetes Staging'
+
+  - get: source-code
+    resource: master-source-code
+
+  - put: slack-notification
+    params:
+      channel: ((slack_channel))
+      username: ((slack_username))
+      icon_url: ((slack_logo))
+      text_file: version/version
+      text: >
+        Deploying to Kubernetes... :ahoy: (Environment: Live,
+        Version: <https://github.com/((github_user))/((github_repository_name))/releases/tag/$TEXT_FILE_CONTENT|$TEXT_FILE_CONTENT>,
+        Build: <http://((concourse_host))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_NAME>)
+
+  - aggregate:
+    - put: wine-order-service-helm-live
+      params:
+        chart: hf-charts/wine-order-service
+        values:
+        - source-code/ahoy/wine-order-service/values-live.yaml
+        - source-code/ahoy/wine-order-service/secrets-live.yaml
+        version: version/version
+        vpass: ((ansible_vpass))
+        wait_until_ready: 300
+        override_values:
+        - key: tag
+          path: version/version
+      on_failure:
+        put: slack-notification
+        params:
+          channel: ((slack_channel))
+          username: ((slack_username))
+          icon_url: ((slack_logo))
+          text_file: version/version
+          text: >
+            Deployment to Kubernetes failed! :x: (Environment: Live,
+            Chart: wine-order-service
+            Version: <https://github.com/((github_user))/((github_repository_name))/releases/tag/$TEXT_FILE_CONTENT|$TEXT_FILE_CONTENT>,
+            Build: <http://((concourse_host))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_NAME>)
+
+      on_success:
+        put: slack-notification
+        params:
+          channel: ((slack_channel))
+          username: ((slack_username))
+          icon_url: ((slack_logo))
+          text_file: version/version
+          text: >
+            Deployment to Kubernetes succeeded! :white_check_mark: (Environment: Live,
+            Chart: wine-order-service,
+            Version: <https://github.com/((github_user))/((github_repository_name))/releases/tag/$TEXT_FILE_CONTENT|$TEXT_FILE_CONTENT>,
+            Build: <http://((concourse_host))/teams/$BUILD_TEAM_NAME/pipelines/$BUILD_PIPELINE_NAME/jobs/$BUILD_JOB_NAME/builds/$BUILD_NAME|$BUILD_NAME>)
+
+
+#-----------------------------------------------------------------------------------------------------------------------
+# House keeping flow
+#-----------------------------------------------------------------------------------------------------------------------
+
+- name: 'Cleanup Releases'
+  serial: true
+  plan:
+    - get: housekeeper
+      trigger: true
+
+    - get: jetstream-ci-scripts
+
+    - task: Cleanup draft releases
+      file: jetstream-ci-scripts/tasks/release-draft-cleanup.yml
+      params:
+        ACCESS_TOKEN: ((github_token))
+        REPOSITORY: ((github_user))/((github_repository_name))
