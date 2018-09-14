@@ -1,0 +1,16 @@
+{{- if .Values.configMap }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ template "wine-order-service.fullname" . }}
+  labels:
+    app: {{ template "wine-order-service.name" . }}
+    chart: {{ template "wine-order-service.chart" . }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+    tribe: {{ .Values.tribe }}
+    squad: {{ .Values.squad }}
+
+data:
+{{ toYaml .Values.configMap | indent 2 }}
+{{- end }}

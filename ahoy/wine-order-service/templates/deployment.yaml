@@ -1,0 +1,98 @@
+{{- range $key, $value := .Values.deployments }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ template "wine-order-service.fullname" $ }}-{{ $key }}
+  labels:
+    app: {{ template "wine-order-service.name" $ }}-{{ $key }}
+    chart: {{ template "wine-order-service.chart" $ }}
+    release: {{ $.Release.Name }}
+    heritage: {{ $.Release.Service }}
+    tribe: {{ $.Values.tribe }}
+    squad: {{ $.Values.squad }}
+spec:
+  replicas: {{ $value.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ template "wine-order-service.name" $ }}-{{ $key }}
+      release: {{ $.Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "wine-order-service.name" $ }}-{{ $key }}
+        release: {{ $.Release.Name }}
+        environment: {{ $.Values.environment }}
+        tribe: {{ $.Values.tribe }}
+        squad: {{ $.Values.squad }}
+    spec:
+      dnsConfig:
+        options:
+          - name: ndots
+            value: "1"
+      containers:
+        - name: {{ $.Chart.Name }}-{{ $key }}
+          {{- if $.Values.tag }}
+          image: "{{ $value.repository }}:{{ $.Values.tag }}"
+          {{- else }}
+          image: "{{ $value.repository }}:{{ $.Chart.AppVersion }}"
+          {{- end }}
+          imagePullPolicy: {{ $value.pullPolicy }}
+          {{- if $value.command }}
+          command: {{ $value.command }}
+          {{- end }}
+          {{- if $value.args }}
+          args:
+{{ toYaml $value.args | indent 12 }}
+          {{- end }}
+          {{- if $value.env }}
+          env:
+          - name: JAEGER_AGENT_HOST
+            valueFrom:
+              fieldRef:
+                fieldPath: status.hostIP
+          {{- range $envName, $envValue := $value.env }}
+          - name: {{ $envName }}
+            value: {{ $envValue | quote }}
+          {{- end }}
+          {{- end }}
+          {{- if or ($.Values.configMap) ($.Values.secrets) }}
+          envFrom:
+          {{- if $.Values.configMap }}
+            - configMapRef:
+                name: {{ template "wine-order-service.fullname" $ }}
+          {{- end }}
+          {{- if $.Values.secrets }}
+            - secretRef:
+                name: {{ template "wine-order-service.fullname" $ }}
+          {{- end }}
+          {{- end }}
+          {{- if $value.containerPort }}
+          ports:
+            - name: http
+              containerPort: {{ $value.containerPort }}
+              protocol: TCP
+          {{- end }}
+          {{- with $value.livenessProbe }}
+          livenessProbe:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- with $value.readinessProbe }}
+          readinessProbe:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          resources:
+{{ toYaml $value.resources | indent 12 }}
+    {{- with $value.nodeSelector }}
+      nodeSelector:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with $value.affinity }}
+      affinity:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+    {{- with $value.tolerations }}
+      tolerations:
+{{ toYaml . | indent 8 }}
+    {{- end }}
+{{- end }}

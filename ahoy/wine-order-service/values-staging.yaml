@@ -1,0 +1,142 @@
+# Environment tag
+environment: staging
+tag: latest
+tribe: yourtribe
+squad: yoursquad
+deployments:
+  api:
+    # Number of pods to run
+    replicaCount: 2
+    # More info: https://kubernetes.io/docs/tasks/run-application/configure-pdb/
+    # Must be less than "replicaCount" to make the update rolling-like with some pods always available
+    minAvailable: 1
+    # Same as above, but controls availability from another side of it
+    #maxUnavailable: 1
+    containerPort: 80
+    repository: quay.io/hellofresh/<CHARTNAME>
+    pullPolicy: IfNotPresent
+    #env:
+    #  foo: "bar"
+    # https://kubernetes.io/docs/tasks/inject-data-application/define-environment-variable-container/
+
+    # More info
+    # https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/
+    livenessProbe:
+      httpGet:
+        path: /status
+        port: http
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /status
+        port: http
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 3
+    resources:
+      requests:
+        cpu: 250m
+        memory: 100Mi
+
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    hpa:
+      enabled: false
+      #
+      # To enable HPA, use values acoording to below exmaple
+      #enabled: true
+      #replicas:
+      #  min: <Minimum Number of Pods>
+      #  max: <Maximum Number of Pods>
+      #metrics:
+      #- type: Resource
+      #  resource:
+      #    name: cpu
+      #    targetAverageUtilization: <Target CPU utilization across pods>
+
+  consumers:
+    # Number of pods to run
+    replicaCount: 1
+    containerPort: 80
+    repository: quay.io/hellofresh/<CHARTNAME>
+    pullPolicy: IfNotPresent
+    # More info
+    # https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-probes/
+    livenessProbe:
+      httpGet:
+        path: /status
+        port: http
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 3
+    readinessProbe:
+      httpGet:
+        path: /status
+        port: http
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 3
+      successThreshold: 1
+      failureThreshold: 3
+    resources:
+      requests:
+        cpu: 250m
+        memory: 100Mi
+
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+    hpa:
+      enabled: false
+      #
+      # To enable HPA, use values acoording to below exmaple
+      #enabled: true
+      #replicas:
+      #  min: <Minimum Number of Pods>
+      #  max: <Maximum Number of Pods>
+      #metrics:
+      #- type: Resource
+      #  resource:
+      #    name: cpu
+      #    targetAverageUtilization: <Target CPU utilization across pods>
+
+services:
+  api:
+    enabled: true
+    type: ClusterIP
+  consumers:
+    enabled: false
+# Enable if the service is a producer and needs access from legacy infrastructure
+ingresses:
+  api:
+    enabled: true
+    annotations:
+      kubernetes.io/ingress.class: "nginx"
+    path: /
+    hosts:
+      - <CHARTNAME>.staging-k8s.hellofresh.io
+  consumers:
+    enabled: false
+cronJobs:
+  cronjob1:
+    repository: quay.io/hellofresh/<CHARTNAME>
+    pullPolicy: Always
+    schedule: "*/1 * * * *"
+    command: ["/bin/echo"]
+    args:
+      - "$(date)"
+    failedJobsHistoryLimit: 1
+    successfulJobsHistoryLimit: 3
+    concurrencyPolicy: Forbid
+# KV pairs for values for ENV vars
+configMap:
+  foo: "bar"

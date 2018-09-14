@@ -1,0 +1,18 @@
+{{ if .Values.PrometheusRules }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app: {{ template "wine-order-service.name" $ }}
+    chart: {{ template "wine-order-service.chart" $ }}
+    release: {{ $.Release.Name }}
+    heritage: {{$.Release.Service }}
+    tribe: {{ $.Values.tribe }}
+    squad: {{ $.Values.squad }}
+    prometheus: kube-prometheus
+    role: alert-rules
+  name: {{ template "wine-order-service.name" $ }}
+spec:
+  groups:
+{{ toYaml .Values.PrometheusRules | indent 4 }}
+{{ end }}

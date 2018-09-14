@@ -1,0 +1,29 @@
+{{- range $key, $value := .Values.deployments }}
+{{- if or ($value.minAvailable) ($value.maxUnavailable) }}
+{{- if lt $value.minAvailable $value.replicaCount }}
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ template "wine-order-service.fullname" $ }}-{{ $key }}
+  labels:
+    app: {{ template "wine-order-service.name" $ }}
+    chart: {{ template "wine-order-service.chart" $ }}
+    release: {{ $.Release.Name }}
+    heritage: {{ $.Release.Service }}
+    tribe: {{ $.Values.tribe }}
+    squad: {{ $.Values.squad }}
+spec:
+  {{- if $value.minAvailable }}
+  minAvailable: {{ $value.minAvailable }}
+  {{- end }}
+  {{- if $value.maxUnavailable }}
+  maxUnavailable: {{ $value.maxUnavailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ template "wine-order-service.name" $ }}-{{ $key }}
+      release: {{ $.Release.Name }}
+{{- end }}
+{{- end }}
+{{- end }}
