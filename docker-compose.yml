@@ -1,0 +1,19 @@
+version: '3'
+
+services:
+  consumer:
+    build:
+      context: .
+    environment:
+      RABBITMQ_USER: "wine-order-service"
+      RABBITMQ_PASS: "winedoch"
+      RABBITMQ_HOST: "rabbit"
+  rabbit:
+    image: rabbitmq:3.6-management
+    ports:
+      - 15672:15672
+      - 5672:5672
+    environment:
+      RABBITMQ_DEFAULT_USER: "wine-order-service"
+      RABBITMQ_DEFAULT_PASS: "winedoch"
+      RABBITMQ_DEFAULT_VHOST: "/"

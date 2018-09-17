@@ -26,35 +26,25 @@ spec:
         tribe: {{ $.Values.tribe }}
         squad: {{ $.Values.squad }}
     spec:
-      dnsConfig:
-        options:
-          - name: ndots
-            value: "1"
+      {{- if $value.volumes }}
+      volumes:
+{{ toYaml $value.volumes | indent 6 }}
+      {{- end }}
       containers:
-        - name: {{ $.Chart.Name }}-{{ $key }}
-          {{- if $.Values.tag }}
-          image: "{{ $value.repository }}:{{ $.Values.tag }}"
+      {{- range $name, $container := $value.containers }}
+        - name: {{ $.Chart.Name }}-{{ $name }}
+          {{- if $container.tag  }}
+          image: "{{ $container.repository }}:{{ $container.tag }}"
           {{- else }}
-          image: "{{ $value.repository }}:{{ $.Chart.AppVersion }}"
+          image: "{{ $container.repository }}:{{ $.Values.tag }}"
           {{- end }}
-          imagePullPolicy: {{ $value.pullPolicy }}
-          {{- if $value.command }}
-          command: {{ $value.command }}
+          imagePullPolicy: {{ $container.pullPolicy }}
+          {{- if $container.command }}
+          command: {{ $container.command }}
           {{- end }}
-          {{- if $value.args }}
+          {{- if $container.args }}
           args:
-{{ toYaml $value.args | indent 12 }}
-          {{- end }}
-          {{- if $value.env }}
-          env:
-          - name: JAEGER_AGENT_HOST
-            valueFrom:
-              fieldRef:
-                fieldPath: status.hostIP
-          {{- range $envName, $envValue := $value.env }}
-          - name: {{ $envName }}
-            value: {{ $envValue | quote }}
-          {{- end }}
+{{ toYaml $container.args | indent 12 }}
           {{- end }}
           {{- if or ($.Values.configMap) ($.Values.secrets) }}
           envFrom:
@@ -67,22 +57,25 @@ spec:
                 name: {{ template "wine-order-service.fullname" $ }}
           {{- end }}
           {{- end }}
-          {{- if $value.containerPort }}
+          {{- if $container.ports }}
           ports:
-            - name: http
-              containerPort: {{ $value.containerPort }}
-              protocol: TCP
+{{ toYaml $container.ports | indent 12 }}
           {{- end }}
-          {{- with $value.livenessProbe }}
+          {{- with $container.livenessProbe }}
           livenessProbe:
 {{ toYaml . | indent 12 }}
           {{- end }}
-          {{- with $value.readinessProbe }}
+          {{- with $container.readinessProbe }}
           readinessProbe:
 {{ toYaml . | indent 12 }}
           {{- end }}
+          {{- if $container.volumeMounts }}
+          volumeMounts:
+{{ toYaml $container.volumeMounts | indent 12 }}
+          {{- end }}
           resources:
-{{ toYaml $value.resources | indent 12 }}
+{{ toYaml $container.resources | indent 12 }}
+    {{- end }}
     {{- with $value.nodeSelector }}
       nodeSelector:
 {{ toYaml . | indent 8 }}
